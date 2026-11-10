@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 import zlib from 'node:zlib'
 import { Dataset } from './lib/dataset.js'
 import { SegmentError, ready } from './lib/segment.js'
+import { loadPresets, sceneSensors } from './lib/sensors.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const PUBLIC = path.join(HERE, 'public')
@@ -25,14 +26,16 @@ options:
                        0.0.0.0 to reach it from other machines (e.g. a cluster node)
   --token T            access token (env VIEWER_TOKEN); generated automatically when the
                        host is not a loopback address, "none" disables it
-  --max-width N        downscale camera images wider than N pixels (default 1280, 0 = never)`)
+  --max-width N        downscale camera images wider than N pixels (default 1280, 0 = never)
+  --catalog FILE       simulator catalog.json (e.g. 09_simulator_config/data/catalog.json) with
+                       the sensor presets for the coverage cones; default lib/presets.json`)
   process.exit(code)
 }
 
 function parseArgs(argv) {
   const opts = {
     root: null, port: Number(process.env.VIEWER_PORT ?? 8700), host: process.env.VIEWER_HOST ?? '127.0.0.1',
-    token: process.env.VIEWER_TOKEN ?? null, maxWidth: 1280,
+    token: process.env.VIEWER_TOKEN ?? null, maxWidth: 1280, catalog: process.env.VIEWER_CATALOG ?? null,
   }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
@@ -42,6 +45,7 @@ function parseArgs(argv) {
     else if (a === '--host') opts.host = next()
     else if (a === '--token') opts.token = next()
     else if (a === '--max-width') opts.maxWidth = Number(next())
+    else if (a === '--catalog') opts.catalog = next()
     else if (a.startsWith('-')) { console.error(`unknown option ${a}`); usage(2) }
     else if (!opts.root) opts.root = a
     else usage(2)
@@ -61,6 +65,7 @@ else if (!opts.token && !loopback) opts.token = crypto.randomBytes(12).toString(
 
 await ready
 const dataset = new Dataset(opts.root)
+const presets = loadPresets(opts.catalog)
 
 // ---- helpers ----------------------------------------------------------------------
 
@@ -99,7 +104,11 @@ function api(req, res, url) {
   const k = () => int(q.get('frame'), 0)
   const maxWidth = q.has('max_width') ? int(q.get('max_width'), opts.maxWidth) : opts.maxWidth
   switch (p) {
-    case '/api/segment': return json(req, res, seg().summary())
+    case '/api/segment': {
+      const s = seg()
+      s._coverage ??= sceneSensors(s.path, s.summary(), presets)
+      return json(req, res, { ...s.summary(), coverage: s._coverage })
+    }
     case '/api/thumb': {
       const buf = seg().thumbnailPng(int(q.get('w'), 320))
       return buf ? png(req, res, buf) : send(req, res, 404, Buffer.from('no image'), 'text/plain')

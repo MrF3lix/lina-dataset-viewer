@@ -1,0 +1,138 @@
+{
+ "event_640": {
+  "type": "event",
+  "resolution": [
+   640,
+   360
+  ],
+  "focal_length_mm": 35,
+  "sensor_width_mm": 35,
+  "clip_start_m": 0.1
+ },
+ "lidar_avia": {
+  "type": "lidar",
+  "lidar": {
+   "backend": "pattern",
+   "pattern": "data/lidar_patterns/livox_avia.npz",
+   "range_m": 450,
+   "min_range_m": 0
+  },
+  "pattern_info": {
+   "name": "livox_avia",
+   "fov_h_deg": 70.6,
+   "fov_v_deg": 77.2,
+   "az_min_deg": -35.3,
+   "az_max_deg": 35.3,
+   "el_min_deg": -38.6,
+   "el_max_deg": 38.6
+  }
+ },
+ "lidar_mid360": {
+  "type": "lidar",
+  "lidar": {
+   "backend": "blainder",
+   "fov_h_deg": 360,
+   "fov_v_deg": 59,
+   "range_m": 70
+  }
+ },
+ "lidar_mid360_livox": {
+  "type": "lidar",
+  "lidar": {
+   "backend": "pattern",
+   "pattern": "data/lidar_patterns/livox_mid360.npz",
+   "range_m": 70,
+   "min_range_m": 0.1
+  },
+  "pattern_info": {
+   "name": "livox_mid360",
+   "fov_h_deg": 360,
+   "fov_v_deg": 59.4,
+   "az_min_deg": -180,
+   "az_max_deg": 180,
+   "el_min_deg": -7.2,
+   "el_max_deg": 52.2
+  }
+ },
+ "lidar_vlp16": {
+  "type": "lidar",
+  "lidar": {
+   "backend": "blainder",
+   "fov_h_deg": 360,
+   "fov_v_deg": 30,
+   "range_m": 100
+  }
+ },
+ "radar_echoguard": {
+  "type": "radar",
+  "radar": {
+   "schedule": "esa",
+   "fov_az_deg": 120,
+   "fov_el_deg": 80,
+   "el_center_deg": 0,
+   "beamwidth_el_deg": 2,
+   "min_range_m": 20,
+   "max_range_m": 3500
+  }
+ },
+ "radar_echoshield": {
+  "type": "radar",
+  "radar": {
+   "schedule": "esa",
+   "fov_az_deg": 130,
+   "fov_el_deg": 90,
+   "el_center_deg": 0,
+   "beamwidth_el_deg": 1.5,
+   "min_range_m": 20,
+   "max_range_m": 6000
+  }
+ },
+ "radar_elvira": {
+  "type": "radar",
+  "radar": {
+   "schedule": "rotating",
+   "el_center_deg": 20,
+   "elevation_beams": null,
+   "beamwidth_el_deg": 40,
+   "min_range_m": 50,
+   "max_range_m": 5000
+  }
+ },
+ "radar_iris": {
+  "type": "radar",
+  "radar": {
+   "schedule": "rotating",
+   "elevation_beams": [
+    5,
+    15,
+    25,
+    35,
+    45,
+    55
+   ],
+   "beamwidth_el_deg": 10,
+   "min_range_m": 50,
+   "max_range_m": 5000
+  }
+ },
+ "rgb_1080": {
+  "type": "rgb",
+  "resolution": [
+   1920,
+   1080
+  ],
+  "focal_length_mm": 35,
+  "sensor_width_mm": 35,
+  "clip_start_m": 0.1
+ },
+ "rgb_640": {
+  "type": "rgb",
+  "resolution": [
+   640,
+   360
+  ],
+  "focal_length_mm": 35,
+  "sensor_width_mm": 35,
+  "clip_start_m": 0.1
+ }
+}

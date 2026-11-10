@@ -18,6 +18,7 @@ const h = (tag, attrs = {}, ...children) => {
 }
 const fmt = (v, d = 1) => (v == null || Number.isNaN(v) ? '–' : Number(v).toFixed(d))
 const esc = encodeURIComponent
+const escHtml = (t) => String(t).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
 const state = {
   dataset: null,
@@ -29,7 +30,7 @@ const state = {
   playing: false,
   speed: 1,
   show: load('show', { camera: true, events: true, top: true, depth: true, map: true, info: true }),
-  overlay: load('overlay', { boxes2d: true, boxes3d: true, mask: false, lidar: false, paths: true, labels: true }),
+  overlay: load('overlay', { boxes2d: true, boxes3d: true, mask: false, lidar: false, paths: true, labels: true, coverage: true }),
   eventWindow: 'f1', // fN = N dataset frames, sJ = sub-interval J of the frame
   lidarColor: 'height',
   lidarDot: 2,
@@ -218,6 +219,100 @@ function card(badge, title, extraHead = []) {
     body)
   const setMsg = (text, err = false) => { msg.hidden = !text; msg.textContent = text ?? ''; msg.className = 'view-msg' + (err ? ' err' : '') }
   return { el, body, info, setMsg }
+}
+
+// ---- sensor coverage (the cones of the web app's map) -------------------------------------
+
+// the web app's colours: cameras solid, scanners dashed
+const SENSOR_COLORS = { rgb: '#8b5cf6', event: '#ea580c', lidar: '#65a30d', radar: '#0891b2' }
+const sensorColor = (s) => SENSOR_COLORS[s.type] ?? '#9b9b9b'
+const DEG = Math.PI / 180
+
+/** Position, viewing direction (-Z of the Blender world matrix) and the horizontal window of a
+ *  sensor at dataset frame k. `look` is a math angle (from east, counter-clockwise); the window
+ *  [a0, a1] in the same convention (positive azimuth of the sensor = to its right). */
+function sensorPose(s, k) {
+  const m = s.worlds?.[Math.min(k, s.worlds.length - 1)] ?? s.world
+  if (!m) return null
+  const f = [-m[2], -m[6], -m[10]]
+  const horiz = Math.hypot(f[0], f[1])
+  const look = horiz > 1e-3 ? Math.atan2(f[1], f[0]) : Math.atan2(m[5], m[1]) // straight up/down: its +Y
+  const pitch = Math.atan2(f[2], horiz) / DEG
+  const heading = ((90 - look / DEG) % 360 + 360) % 360 // compass, clockwise from north
+  const az = s.az ?? [0, 0]
+  return { origin: [m[3], m[7], m[11]], look, pitch, heading, a0: look - az[1] * DEG, a1: look - az[0] * DEG }
+}
+
+function sensorText(s, p) {
+  const fov = s.known ? `${fmt(s.hfov, 1)}° × ${fmt(s.vfov, 1)}°` : 'field of view unknown'
+  const dir = p ? `, heading ${fmt(p.heading, 0)}°, pitch ${p.pitch >= 0 ? '+' : ''}${fmt(p.pitch, 0)}°` : ''
+  const range = s.range_m ? `, ${s.min_range_m ? `${s.min_range_m}–` : ''}${s.range_m} m` : ''
+  return `${s.key} (${s.type ?? '?'}${s.preset ? `, ${s.preset}` : ''}): ${fov}${dir}${range}`
+}
+
+/** The horizontal wedge of a sensor as polygon points (scene metres), out to `len`. */
+function wedgePoints(p, len) {
+  const span = p.a1 - p.a0
+  const n = Math.max(2, Math.ceil(span / (4 * DEG)))
+  const pts = [[p.origin[0], p.origin[1]]]
+  for (let i = 0; i <= n; i++) {
+    const a = p.a0 + (span * i) / n
+    pts.push([p.origin[0] + Math.cos(a) * len, p.origin[1] + Math.sin(a) * len])
+  }
+  return pts
+}
+
+/** Draw every sensor's coverage into a top-down canvas: wedges to `far` metres (or the sensor's
+ *  range when shorter), all-round scanners as a dashed range circle, a view line, a legend. */
+function drawCoverage(ctx, toPx, scale, k, far) {
+  const sensors = state.seg.coverage?.sensors ?? []
+  ctx.save()
+  const legend = []
+  for (const s of sensors) {
+    const p = sensorPose(s, k)
+    if (!p) continue
+    const color = sensorColor(s)
+    const dashed = s.type === 'lidar' || s.type === 'radar'
+    ctx.strokeStyle = color
+    ctx.fillStyle = color
+    ctx.lineWidth = 1.5
+    ctx.setLineDash(dashed ? [6, 4] : [])
+    const [ox, oy] = toPx(p.origin[0], p.origin[1])
+    if (s.known && s.all_round) {
+      if (s.range_m) { ctx.beginPath(); ctx.arc(ox, oy, s.range_m * scale, 0, Math.PI * 2); ctx.stroke() }
+    } else if (s.known) {
+      const len = s.range_m ? Math.min(s.range_m, far) : far
+      const pts = wedgePoints(p, len).map(([x, y]) => toPx(x, y))
+      ctx.beginPath()
+      pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)))
+      ctx.closePath()
+      ctx.globalAlpha = 0.09; ctx.fill()
+      ctx.globalAlpha = 0.85; ctx.stroke()
+      ctx.globalAlpha = 1
+    }
+    // the optical / forward axis, shortened by the pitch like in the web app
+    const axis = Math.min(far, 60 / scale + 20) * Math.max(0.15, Math.cos(p.pitch * DEG))
+    ctx.setLineDash([3, 3])
+    ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ox + Math.cos(p.look) * axis * scale, oy - Math.sin(p.look) * axis * scale); ctx.stroke()
+    legend.push([color, sensorText(s, p)])
+  }
+  ctx.restore()
+  return legend
+}
+
+function drawLegend(ctx, legend, H) {
+  ctx.save()
+  ctx.font = '15px sans-serif'
+  legend.forEach(([color, text], i) => {
+    const y = H - 34 - (legend.length - 1 - i) * 20
+    ctx.fillStyle = 'rgba(20,20,20,0.75)'
+    ctx.fillRect(6, y - 15, ctx.measureText(text).width + 32, 20)
+    ctx.fillStyle = color
+    ctx.fillRect(10, y - 11, 12, 12)
+    ctx.fillStyle = '#d0d0d0'
+    ctx.fillText(text, 28, y)
+  })
+  ctx.restore()
 }
 
 // ---- views ------------------------------------------------------------------------------
@@ -447,24 +542,8 @@ class TopView {
     ctx.strokeStyle = '#2a2a2a'
     ctx.lineWidth = 1
     for (let r = step; r <= range * 2.5; r += step) { ctx.beginPath(); ctx.arc(sx, sy, r * scale, 0, Math.PI * 2); ctx.stroke() }
-    // the camera's horizontal field of view (Blender camera: looks along -Z) as a wedge
-    const cw = seg.camera_world[k]
-    if (cw && seg.K && seg.image_shape) {
-      const look = Math.atan2(-cw[6], -cw[2]) // math angle (from east, counter-clockwise)
-      const half = Math.atan(seg.image_shape[1] / 2 / seg.K[0][0])
-      const [cx0, cy0] = toPx(cw[3], cw[7])
-      const far = Math.hypot(W, H)
-      ctx.save()
-      ctx.fillStyle = 'rgba(71,114,179,0.10)'
-      ctx.strokeStyle = 'rgba(71,114,179,0.6)'
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      ctx.moveTo(cx0, cy0)
-      ctx.lineTo(cx0 + Math.cos(look - half) * far, cy0 - Math.sin(look - half) * far)
-      ctx.lineTo(cx0 + Math.cos(look + half) * far, cy0 - Math.sin(look + half) * far)
-      ctx.closePath(); ctx.fill(); ctx.stroke()
-      ctx.restore()
-    }
+    // every sensor's coverage, under the points (wedges out past the canvas edge)
+    const legend = state.overlay.coverage ? drawCoverage(ctx, toPx, scale, k, (Math.hypot(W, H) / scale) * 1.5) : []
     // points
     if (n) {
       let zmin = Infinity, zmax = -Infinity, imax = 1e-6
@@ -536,6 +615,7 @@ class TopView {
     ctx.fillStyle = '#9b9b9b'
     ctx.font = '12px sans-serif'
     ctx.fillText('N ↑', 10, 18)
+    drawLegend(ctx, legend, H)
     ctx.fillRect(10, H - 16, step * scale, 2)
     ctx.fillText(`${step} m`, 16 + step * scale, H - 11)
     const objPts = owner.filter(Boolean).length
@@ -574,12 +654,14 @@ class MapView {
     L.control.layers({ satellite: sat, OpenStreetMap: osm }, {}, { position: 'topright' }).addTo(map)
     const bounds = [this.toLatLng(0, 0)]
     L.circleMarker(this.toLatLng(0, 0), { radius: 3, color: '#ffffff', weight: 1, fillOpacity: 0.6 }).bindTooltip('scene origin').addTo(map)
-    const P = seg.lidar_world[0] ?? seg.camera_world[0]
-    if (P) {
-      const ll = this.toLatLng(P[3], P[7])
-      bounds.push(ll)
-      L.circleMarker(ll, { radius: 6, color: '#a070e0', weight: 2, fillOpacity: 0.8 }).bindTooltip('sensors').addTo(map)
+    for (const s of seg.coverage?.sensors ?? []) {
+      const p = sensorPose(s, 0)
+      if (p) bounds.push(this.toLatLng(p.origin[0], p.origin[1]))
     }
+    this.coverage = L.layerGroup().addTo(map)
+    // the cones only need redrawing per frame when a sensor moves
+    this.moving = (seg.coverage?.sensors ?? []).some((s) => s.worlds && s.worlds.some((m) => m[3] !== s.worlds[0][3] || m[7] !== s.worlds[0][7] || m[2] !== s.worlds[0][2]))
+    this.drawCoverage(state.frame)
     for (const [name, path] of Object.entries(seg.paths)) {
       const color = objectColor(name)
       const lls = path.map((p) => this.toLatLng(p[1], p[2]))
@@ -589,7 +671,45 @@ class MapView {
     }
     map.fitBounds(L.latLngBounds(bounds).pad(0.4), { maxZoom: 19 })
   }
+  /** One wedge per sensor out to past the farthest drone (or the sensor's range when shorter),
+   *  a dashed range circle for all-round scanners, the viewing axis and a marker per payload. */
+  drawCoverage(k) {
+    if (!this.coverage) return
+    this.coverage.clearLayers()
+    this.drawnFor = k
+    const seg = state.seg
+    const sensors = seg.coverage?.sensors ?? []
+    const payloads = new Map()
+    for (const s of sensors) {
+      const p = sensorPose(s, k)
+      if (!p) continue
+      if (!payloads.has(s.payload)) payloads.set(s.payload, { origin: p.origin, lines: [] })
+      payloads.get(s.payload).lines.push(sensorText(s, p))
+      if (!state.overlay.coverage) continue
+      let reach = 40
+      for (const path of Object.values(seg.paths)) for (const q of path) reach = Math.max(reach, Math.hypot(q[1] - p.origin[0], q[2] - p.origin[1]) * 1.3)
+      const color = sensorColor(s)
+      const dash = s.type === 'lidar' || s.type === 'radar' ? '6 4' : undefined
+      const tip = sensorText(s, p) + (s.detail ? ` · ${s.detail}` : '') + (s.pose === 'config' ? ' · pose from the scene config' : '')
+      if (s.known && s.all_round) {
+        if (s.range_m) L.circle(this.toLatLng(p.origin[0], p.origin[1]), { radius: s.range_m, color, weight: 1.5, dashArray: dash, fill: false }).bindTooltip(escHtml(tip), { sticky: true }).addTo(this.coverage)
+      } else if (s.known) {
+        const len = s.range_m ? Math.min(s.range_m, reach) : reach
+        L.polygon(wedgePoints(p, len).map(([x, y]) => this.toLatLng(x, y)), { color, weight: 1.5, fillOpacity: 0.12, dashArray: dash })
+          .bindTooltip(escHtml(tip), { sticky: true }).addTo(this.coverage)
+      }
+      const axis = 40 * Math.max(0.15, Math.cos(p.pitch * DEG))
+      L.polyline([this.toLatLng(p.origin[0], p.origin[1]), this.toLatLng(p.origin[0] + Math.cos(p.look) * axis, p.origin[1] + Math.sin(p.look) * axis)],
+        { color, weight: 2, dashArray: '4 3' }).bindTooltip(escHtml(tip), { sticky: true }).addTo(this.coverage)
+    }
+    for (const [name, pl] of payloads) {
+      L.circleMarker(this.toLatLng(pl.origin[0], pl.origin[1]), { radius: 6, color: '#ffffff', weight: 2, fillColor: '#a070e0', fillOpacity: 0.9 })
+        .bindTooltip(`<b>${escHtml(name)}</b><br>${pl.lines.map(escHtml).join('<br>')}`).addTo(this.coverage)
+    }
+  }
+  redrawCoverage() { this.drawCoverage(state.frame) }
   update(k) {
+    if (this.moving && this.drawnFor !== k) this.drawCoverage(k)
     for (const [name, path] of Object.entries(state.seg.paths)) {
       const m = this.markers[name]
       if (!m) continue
@@ -652,7 +772,29 @@ function metaCard() {
         prop('engine', `${seg.engine ?? ''} · linasim ${seg.linasim_version ?? ''}`),
         prop('source run', h('code', {}, seg.source_run ?? '')),
         prop('file', h('code', {}, seg.file))),
+      sensorTable(),
       h('details', {}, h('summary', {}, 'segment_meta.json'), h('pre', {}, JSON.stringify(seg.meta, null, 2)))))
+}
+
+function sensorTable() {
+  const cov = state.seg.coverage
+  if (!cov?.sensors?.length) return null
+  const POSE = { recorded: 'recorded in the segment', relative: 'relative to a recorded sensor of the payload', config: 'scene config (static payload)' }
+  return h('div', { style: 'margin-top:8px' },
+    h('div', { class: 'muted small' }, `sensors at frame 0 (from ${cov.source})`),
+    h('table', {},
+      h('tr', {}, ...['sensor', 'type', 'FOV h × v', 'heading', 'pitch', 'range', 'pose'].map((t) => h('th', {}, t))),
+      cov.sensors.map((s) => {
+        const p = sensorPose(s, 0)
+        return h('tr', { title: s.detail ?? '' },
+          h('td', {}, h('span', { class: 'swatch', style: `background:${sensorColor(s)}` }), s.key),
+          h('td', {}, `${s.type ?? '?'}${s.preset ? ` · ${s.preset}` : ''}`),
+          h('td', { class: 'num' }, s.known ? `${fmt(s.hfov, 1)}° × ${fmt(s.vfov, 1)}°` : 'unknown'),
+          h('td', { class: 'num' }, p ? `${fmt(p.heading, 0)}°` : '–'),
+          h('td', { class: 'num' }, p ? `${p.pitch >= 0 ? '+' : ''}${fmt(p.pitch, 0)}°` : '–'),
+          h('td', { class: 'num' }, s.range_m ? `${s.min_range_m ? `${s.min_range_m}–` : ''}${s.range_m} m` : '–'),
+          h('td', { class: 'muted' }, POSE[s.pose] ?? s.pose ?? ''))
+      })))
 }
 
 // ---- scene page --------------------------------------------------------------------------
@@ -720,6 +862,7 @@ function renderScene() {
       has.masks ? toggle('overlay', 'mask', 'masks', 'object-index masks over the camera image', redraw) : null,
       has.lidar ? toggle('overlay', 'lidar', 'LiDAR in camera', 'the scan projected into the camera image, coloured by depth (near = yellow), object points in the object colour', redraw) : null,
       toggle('overlay', 'paths', 'paths', 'the drones\' paths in the top view', redraw),
+      toggle('overlay', 'coverage', 'sensor coverage', 'every sensor\'s horizontal field of view and viewing direction on the map and in the top view (dashed: LiDAR and radar)', () => { redraw(); views.forEach((v) => v.redrawCoverage?.()) }),
       toggle('overlay', 'labels', 'labels', 'names and distances next to the boxes', redraw)))
   const playback = h('div', { class: 'playback' },
     h('button', { title: 'previous frame (←)', onclick: () => { stop(); setFrame(state.frame - 1) } }, '◀'),

@@ -33,13 +33,48 @@ up segments added while the server runs.
   sub-interval, accumulated into an image (ON white-blue, OFF red).
 - **LiDAR top view**: the scan in the scene frame (x east, y north) centred on the scanner,
   coloured by height, range or intensity; points inside a 3D box in the object colour; the 3D
-  boxes, the drones' paths, the camera's field of view. Wheel to zoom, drag to pan, **fit**
-  to reset. Without a LiDAR it still shows the boxes and paths.
+  boxes, the drones' paths and every sensor's coverage (below). Wheel to zoom, drag to pan,
+  **fit** to reset. Without a LiDAR it still shows the boxes and paths.
 - **Depth** (when the segment has it), log-scaled.
-- **Map**: the paths on Esri satellite imagery or OpenStreetMap (the browser loads the tiles
-  and Leaflet from the internet; the server needs no internet).
+- **Map**: the paths and every sensor's coverage on Esri satellite imagery or OpenStreetMap
+  (the browser loads the tiles and Leaflet from the internet; the server needs no internet).
 - **Info**: the objects at this frame (vehicle-frame box, distance, size, heading, speed,
-  LiDAR points, in FOV, 2D box) and the scene metadata with the full `segment_meta.json`.
+  LiDAR points, in FOV, 2D box), the scene metadata with the full `segment_meta.json`, and
+  a table of the sensors (FOV, heading, pitch, range, where the pose comes from).
+
+### Sensor coverage
+
+Like the web app's map, every sensor gets a cone: its horizontal field of view as a wedge
+from its position along its viewing direction, with the axis as a dashed line (shortened by
+the pitch), in the web app's colours (RGB purple, event orange, LiDAR green and radar cyan,
+the last two dashed). All-round scanners (rotating LiDAR, rotating radar) get a dashed circle
+at their range instead. Wedges reach past the farthest drone, or to the sensor's range when
+that is shorter; in the top view they run to the canvas edge. Hover a cone or the payload
+marker on the map for the numbers; the top view has a legend. **sensor coverage** toggles
+them.
+
+The segment file only records the exported camera (pose per frame and K) and the LiDAR's pose.
+Everything else comes from the `dataset.json` beside the segment (the scene config of each
+item) and the sensor presets in `lib/presets.json`, resolved with the web app's rules:
+
+- the field of view from focal length and sensor width (cameras), the recorded pattern's
+  angular window or `fov_h_deg × fov_v_deg` (LiDAR), `fov_az_deg × fov_el_deg` (scanned-array
+  radar); the RGB camera's is checked against K;
+- the pose from the segment's matrices when the sensor was exported, otherwise relative to an
+  exported sensor of the same payload (via the mounts), otherwise from the scene config of a
+  static payload.
+
+A segment copied without its `dataset.json` still shows the camera's cone (from K) and the
+LiDAR's direction, but not the other sensors. When the simulator's presets change, regenerate
+`lib/presets.json` from the catalog the GPU worker publishes, or pass it at start-up:
+
+```bash
+node scripts/presets-from-catalog.mjs ../09_simulator_config/data/catalog.json
+```
+
+```bash
+node server.js /path/to/dataset --catalog ../09_simulator_config/data/catalog.json
+```
 
 Play / pause with the button or space, step with ← →; the timeline under the slider marks
 the frames where an object is inside the image (blue) and the events per frame (orange). The
@@ -57,6 +92,7 @@ node server.js <dataset_root> [--port 8700] [--host 127.0.0.1] [--token T] [--ma
 | `--host` | 127.0.0.1 (`VIEWER_HOST`) | `0.0.0.0` to reach it from other machines |
 | `--token` | none on loopback, else random (`VIEWER_TOKEN`) | the printed URL carries `?token=…`; the page sets a cookie and drops it from the URL. `none` disables it |
 | `--max-width` | 1280 | camera images wider than this are box-downscaled by an integer factor before they are sent (a 1920 × 1080 frame goes out at 960 × 540); `0` sends them at full size |
+| `--catalog` | `lib/presets.json` (`VIEWER_CATALOG`) | a simulator `catalog.json` whose sensor presets override the bundled ones |
 
 `VIEWER_LOG=1` logs every request with its time.
 
@@ -108,6 +144,8 @@ If the nodes cannot run the Node binary, an Apptainer image works too:
 - `lib/dataset.js`: finds the segments, reads `dataset.json` and the split files, keeps up
   to 12 files open.
 - `lib/png.js`: a minimal PNG encoder on `node:zlib`.
+- `lib/sensors.js`, `lib/presets.json`: every sensor's coverage and pose (see "Sensor
+  coverage"); `scripts/presets-from-catalog.mjs` regenerates the presets.
 - `public/`: the page, plain ES modules without a build step. The projections (LiDAR and 3D
   boxes into the camera, vehicle → scene frame) run in the browser with the conventions of
   `DATASET.md` §4.
