@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dataset Viewer</title>
+  <link rel="icon" href="favicon.svg" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header>
+      <span class="brand">linasim dataset viewer</span>
+      <span class="sep"></span>
+      <span id="root" class="muted"></span>
+      <span class="spacer"></span>
+      <input id="search" type="search" placeholder="filter scenes…" />
+      <select id="split-filter">
+        <option value="">all splits</option>
+        <option value="train">train</option>
+        <option value="val">val</option>
+      </select>
+      <button id="reload" title="rescan the dataset folder">rescan</button>
+    </header>
+    <main>
+      <aside id="sidebar"></aside>
+      <section id="content"></section>
+    </main>
+  </div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

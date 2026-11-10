@@ -1,0 +1,56 @@
+#!/bin/bash
+#SBATCH --time=480
+#SBATCH --job-name=dataset-viewer
+#SBATCH --ntasks=1
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=4G
+#SBATCH --partition=cpu
+#SBATCH --account=cai_nlp
+#SBATCH --output=logs/slurm/viewer_%j_%N.out
+#SBATCH --error=logs/slurm/viewer_%j_%N.out
+#SBATCH --open-mode=append
+
+# Serve the dataset viewer from a CPU node for the length of the job (default 8 h; change with
+# `sbatch --time=...`). Run from the repository root on the login node:
+#
+#   DATASET=/raid/persistent_scratch/saaf/linasim/datasets/<name> sbatch cluster/viewer.submit
+#   sbatch cluster/viewer.submit /path/to/dataset            # same, as an argument
+#   cluster/view.sh /path/to/dataset                          # submits this and prints the URL
+#
+# The node, port, token and the ssh tunnel command are printed at the top of the job log
+# (logs/slurm/viewer_<job>_<node>.out). Stop it with `scancel <job>`.
+#
+# Environment: DATASET, VIEWER_PORT (default 8700 + job id mod 1000, so two viewers on one node
+# don't collide), VIEWER_TOKEN (default: a fresh random token per job), VIEWER_SSH_HOST (the
+# login node's ssh alias on your machine, for the printed tunnel command; default zhaw-login),
+# VIEWER_NODE_DIR (default ~/.local/node), VIEWER_MAX_WIDTH (camera images, default 1280).
+
+set -euo pipefail
+cd "${SLURM_SUBMIT_DIR:-$(pwd)}"
+
+DATASET="${1:-${DATASET:-}}"
+if [ -z "${DATASET}" ] || [ ! -d "${DATASET}" ]; then
+    echo "ERROR: give the dataset folder: DATASET=/path sbatch cluster/viewer.submit (got '${DATASET}')" >&2
+    exit 1
+fi
+
+export PATH="${VIEWER_NODE_DIR:-$HOME/.local/node}/bin:$PATH"
+if ! command -v node >/dev/null 2>&1; then
+    if command -v module >/dev/null 2>&1; then module load nodejs 2>/dev/null || true; fi
+fi
+if ! command -v node >/dev/null 2>&1; then
+    echo "ERROR: no node on this node; run cluster/install_node.sh once on the login node" >&2
+    exit 1
+fi
+if [ ! -d node_modules/h5wasm ]; then
+    echo "ERROR: node_modules missing; run cluster/install_node.sh (it also runs npm ci) on the login node" >&2
+    exit 1
+fi
+
+JOB="${SLURM_JOB_ID:-0}"
+export VIEWER_PORT="${VIEWER_PORT:-$((8700 + JOB % 1000))}"
+export VIEWER_SSH_HOST="${VIEWER_SSH_HOST:-zhaw-login}"
+
+echo "[$(date +%T)] job ${JOB} on $(hostname), node $(node --version), dataset ${DATASET}"
+exec node server.js "${DATASET}" --host 0.0.0.0 --port "${VIEWER_PORT}" --max-width "${VIEWER_MAX_WIDTH:-1280}"

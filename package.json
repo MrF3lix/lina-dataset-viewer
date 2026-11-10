@@ -1,0 +1,20 @@
+{
+  "name": "linasim-dataset-viewer",
+  "version": "0.1.0",
+  "description": "Browse the scenes of a linasim Ev-Waymo dataset (segment-*.h5): camera, events, LiDAR, boxes, map",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "linasim-dataset-viewer": "server.js"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check lib/segment.js && node --check lib/dataset.js && node --check lib/png.js && node --check public/app.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "h5wasm": "0.10.3"
+  }
+}
