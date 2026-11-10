@@ -1,4 +1,4 @@
-# 10_dataset_viewer
+# LINA Dataset Viewer
 
 A small Node.js app to browse an exported linasim dataset: every scene (segment) of the
 dataset in a list and a thumbnail gallery, and per scene the camera frames, the event camera,
@@ -13,7 +13,7 @@ npm ci
 ```
 
 ```bash
-node server.js /path/to/dataset
+node server.js --port 8700 /path/to/dataset
 ```
 
 and open http://localhost:8700. The dataset folder is searched up to four levels deep for

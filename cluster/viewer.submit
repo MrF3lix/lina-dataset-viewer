@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=4G
 #SBATCH --partition=cpu
-#SBATCH --account=cai_nlp
+#SBATCH --account=cai_exp
 #SBATCH --output=logs/slurm/viewer_%j_%N.out
 #SBATCH --error=logs/slurm/viewer_%j_%N.out
 #SBATCH --open-mode=append
